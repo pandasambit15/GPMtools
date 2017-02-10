@@ -18,6 +18,10 @@ from pyresample import geometry, data_reduce
 import matplotlib.pyplot as plt
 from pyart.graph import cm
 
+def find_nearest(array,value):
+    idx = (np.abs(array-value)).argmin()
+    return idx
+
 def GPMDPRread(filename):
 
     """
@@ -53,12 +57,53 @@ def GPMDPRread(filename):
         key=i.split('/')[-1]
         MS[key]=f[fullpath][:]
         
-    ##Add Z at 3km (index 151 for Ku)
+    ##Add Z at 3km Ku
     Z = NS['zFactorCorrected']
-    Z_3km = Z[:,:,151]
-    Z_3km = np.squeeze(Z_3km)
+
+    x2 = 2. * 17
+    re = 6378.
+    theta = -1 *(x2/2.) + (x2/48.)*np.arange(0,49)
+    theta = theta * (np.pi/180.)
+    prh = np.zeros([176,49])
+    for i in np.arange(0,175):
+        for j in np.arange(0,49):
+            a = np.arcsin(((re+407)/re)*np.sin(theta[j]))-theta[j]
+
+            prh[i,j] = (176-i)*0.125*np.cos(theta[j]+a)
+
+
+    Z_3km = np.zeros(Z.shape[0:2])
+    for j in np.arange(0,prh.shape[1]):
+        temp = prh[:,j]
+        ind = find_nearest(temp,3)
+
+        Z_3km[:,j] = np.squeeze(Z[:,j,ind])
     NS['zFactorCorrected_3km'] = Z_3km
-    ##
+    
+    NS['Height'] = prh
+     ##Add Z at 3km Ka
+    Z = MS['zFactorCorrected']
+    x2 = 2. * 8.5
+    re = 6378.
+    theta = -1 *(x2/2.) + (x2/24.)*np.arange(0,25)
+    theta = theta * (np.pi/180.)
+    prh = np.zeros([176,25])
+    for i in np.arange(0,175):
+        for j in np.arange(0,25):
+            a = np.arcsin(((re+407)/re)*np.sin(theta[j]))-theta[j] #orbital height == 407 km
+            prh[i,j] = (176-i)*0.125*np.cos(theta[j]+a)
+    Z_3km = np.zeros(Z.shape[0:2])
+    for j in np.arange(0,prh.shape[1]):
+        temp = prh[:,j]
+        ind = find_nearest(temp,3)
+
+        Z_3km[:,j] = np.squeeze(Z[:,j,ind])
+        
+    MS['zFactorCorrected_3km'] = Z_3km
+    
+    MS['Height'] = prh
+    
+    
         
     GPM_DPR = {}
     GPM_DPR['NS_Ku'] = NS #Normal Ku scan
@@ -68,7 +113,9 @@ def GPMDPRread(filename):
     return GPM_DPR
 
 
-def GPMDPR_planview(filename,camp='RELAMPAGO',savefig=False,ray = 23,fontsize=14,fontsize2=12,vmin=-20,vmax=75,alpha= 0.8,lw = 3):
+def GPMDPR_planview(filename,camp=' ',savefig=False,Kuray = 23,
+                    fontsize=14,fontsize2=12,vmin=-20,vmax=75,alpha= 0.8,
+                    figsize=(9,4.75),lw = 3,cmap = 'NWSRef',zoom=1,lat_0 = '0',lon_0 = '90'):
     
     """
 
@@ -79,20 +126,35 @@ def GPMDPR_planview(filename,camp='RELAMPAGO',savefig=False,ray = 23,fontsize=14
     =============
     
     """
-    if camp == 'RELAMPAGO':
-        area_def = pr.geometry.AreaDefinition('areaD', 'IPHEx', 'areaD',
-            {'a': '6378144.0', 'b': '6356759.0','lat_0': '-31', 'lat_ts': '31','lon_0': '-60', 'proj': 'stere'},400, 400,
-            [-400000., -400000.,400000., 400000.])
-    elif camp == 'OLYMPEX':
-        area_def = pr.geometry.AreaDefinition('areaD', 'IPHEx', 'areaD',
-            {'a': '6378144.0', 'b': '6356759.0','lat_0': '47.6', 'lat_ts': '47.6','lon_0': '-124.5', 'proj': 'stere'},400, 400,
-            [-400000., -400000.,400000., 400000.])
-    else:
-        print('script not built for this campaign')
+    
+    a1 = 400000.*zoom
+    
+    if camp == ' ' and lat_0 == 0 and lon_0 == 90: #check for basemap inputs
+        print('please designate a campaign (camp = str) or lat_0 and lon_0 (lat_0 = str,lon_0=str)')
         return
+    
+    if camp == 'RELAMPAGO':
+        if lat_0 == '0' and lon_0 == '90': #use defults
+            lat_0 = '-31'
+            lon_0 = '-60'
+        area_def = pr.geometry.AreaDefinition('areaD', 'IPHEx', 'areaD',
+            {'a': '6378144.0', 'b': '6356759.0','lat_0': lat_0, 'lat_ts': lat_0,'lon_0': lon_0, 'proj': 'stere'},400, 400,
+            [-a1, -a1,a1, a1])
+    elif camp == 'OLYMPEX':
+         if lat_0 == '0' and lon_0 == '90': #use defults
+            lat_0 = '47.6'
+            lon_0 = '-124.5'
+         area_def = pr.geometry.AreaDefinition('areaD', 'IPHEx', 'areaD',
+            {'a': '6378144.0', 'b': '6356759.0','lat_0': lat_0, 'lat_ts': lat_0,'lon_0': lon_0, 'proj': 'stere'},400, 400,
+            [-a1, -a1,a1, a1])
+    else:
+        area_def = pr.geometry.AreaDefinition('areaD', 'IPHEx', 'areaD',
+        {'a': '6378144.0', 'b': '6356759.0','lat_0': lat_0, 'lat_ts': lat_0,'lon_0': lon_0, 'proj': 'stere'},400, 400,
+        [-a1, -a1,a1, a1])
 
-    fig=plt.figure(figsize=(18,10.5))
-   
+    fig=plt.figure(figsize=figsize)
+    if cmap == 'NWSRef':
+        cmap = cm.NWSRef
     data = GPMDPRread(filename)
     NS = data['NS_Ku']
     grid_lons, grid_lats = area_def.get_lonlats()
@@ -107,8 +169,7 @@ def GPMDPR_planview(filename,camp='RELAMPAGO',savefig=False,ray = 23,fontsize=14
     Z = data['NS_Ku']['zFactorCorrected_3km']
     Z[Z < vmin] = np.nan
     result=pr.kd_tree.resample_nearest(swath_def,Z, area_def,radius_of_influence=5000, fill_value=np.NAN)
-
-    cmap = cm.NWSRef
+    
     bmap = pr.plot.area_def2basemap(area_def,resolution='l')
     col = bmap.imshow(result, origin='upper',vmin=vmin,vmax=vmax,cmap=cmap,zorder=10,alpha=alpha)
     bmap.drawcoastlines(linewidth=2)
@@ -116,9 +177,9 @@ def GPMDPR_planview(filename,camp='RELAMPAGO',savefig=False,ray = 23,fontsize=14
     bmap.drawcountries(linewidth=2)
 
     #Map Stuff
-    parallels = np.arange(-90.,90,2)
+    parallels = np.arange(-90.,90,zoom*2)
     bmap.drawparallels(parallels,labels=[1,0,0,0],fontsize=fontsize)
-    meridians = np.arange(180.,360.,2)
+    meridians = np.arange(180.,360.,zoom*2)
     bmap.drawmeridians(meridians,labels=[0,0,0,1],fontsize=fontsize)
     bmap.drawmapboundary(fill_color='aqua')
     bmap.fillcontinents(color='coral',lake_color='aqua')
@@ -129,7 +190,7 @@ def GPMDPR_planview(filename,camp='RELAMPAGO',savefig=False,ray = 23,fontsize=14
     cax = cbar.ax
     cax.tick_params(labelsize=fontsize2)
 
-    x,y=bmap(NS['Longitude'][:,ray],NS['Latitude'][:,ray])
+    x,y=bmap(NS['Longitude'][:,Kuray],NS['Latitude'][:,Kuray])
     plt.plot(x,y,'k--',lw=lw,zorder=11)
     x2,y2=bmap(NS['Longitude'][:,0],NS['Latitude'][:,0])
     plt.plot(x2,y2,'k-',lw=lw-.5,zorder=12)
@@ -142,28 +203,42 @@ def GPMDPR_planview(filename,camp='RELAMPAGO',savefig=False,ray = 23,fontsize=14
     if savefig:
         print('Save file is: '+'3km_Ze'+camp+'.png')
         plt.savefig('3km_Ze'+camp+'.png',dpi=300)
+        
     plt.show()
     
     return
 
-def GPMDPR_profile(filename,camp ='OLYMPEX',band='Ku',savefig=False, Kuray = 23, Karay=12,  fontsize=14, fontsize2=12, vmin=-20,
-                   vmax=75,lw = 3,xmin=0,xmax=1000,ymin=0,ymax=12,cmap='seismic'):
-
-    if camp == 'RELAMPAGO':
-        area_def = pr.geometry.AreaDefinition('areaD', 'IPHEx', 'areaD',
-            {'a': '6378144.0', 'b': '6356759.0','lat_0': '-31', 'lat_ts': '31','lon_0': '-60', 'proj': 'stere'},400, 400,
-            [-400000., -400000.,400000., 400000.])
-    elif camp == 'OLYMPEX':
-        area_def = pr.geometry.AreaDefinition('areaD', 'IPHEx', 'areaD',
-            {'a': '6378144.0', 'b': '6356759.0','lat_0': '47.6', 'lat_ts': '47.6','lon_0': '-124.5', 'proj': 'stere'},400, 400,
-            [-400000., -400000.,400000., 400000.])
-    else:
-        print('script not built for this campaign')
+def GPMDPR_profile(filename,camp =' ',band='Ku',savefig=False, Kuray = 23, Karay=11,
+                   fontsize=14, fontsize2=12, vmin=-20,vmax=75,lw = 3, xmin=0, xmax=1000, 
+                   ymin=0,ymax=12,cmap='NWSRef',zoom=1,figsize=(15,4),lat_0 = '0',lon_0 = '90'):
+    
+    a1 = 400000.*zoom
+    
+    if camp == ' ' and lat_0 == 0 and lon_0 == 90: #check for basemap inputs
+        print('please designate a campaign (camp = str) or lat_0 and lon_0 (lat_0 = str,lon_0=str)')
         return
+    
+    if camp == 'RELAMPAGO':
+        if lat_0 == '0' and lon_0 == '90': #use defults
+            lat_0 = '-31'
+            lon_0 = '-60'
+        area_def = pr.geometry.AreaDefinition('areaD', 'IPHEx', 'areaD',
+            {'a': '6378144.0', 'b': '6356759.0','lat_0': lat_0, 'lat_ts': lat_0,'lon_0': lon_0, 'proj': 'stere'},400, 400,
+            [-a1, -a1,a1, a1])
+    elif camp == 'OLYMPEX':
+         if lat_0 == '0' and lon_0 == '90': #use defults
+            lat_0 = '47.6'
+            lon_0 = '-124.5'
+         area_def = pr.geometry.AreaDefinition('areaD', 'IPHEx', 'areaD',
+            {'a': '6378144.0', 'b': '6356759.0','lat_0': lat_0, 'lat_ts': lat_0,'lon_0': lon_0, 'proj': 'stere'},400, 400,
+            [-a1, -a1,a1, a1])
+    else:
+        area_def = pr.geometry.AreaDefinition('areaD', 'IPHEx', 'areaD',
+        {'a': '6378144.0', 'b': '6356759.0','lat_0': lat_0, 'lat_ts': lat_0,'lon_0': lon_0, 'proj': 'stere'},400, 400,
+        [-a1, -a1,a1, a1])
+    
     if cmap == 'NWSRef':
         cmap = cm.NWSRef
-        
-    fig=plt.figure(figsize=(18,10.5))
     
     data = GPMDPRread(filename)
     NS = data['NS_Ku']
@@ -187,7 +262,8 @@ def GPMDPR_profile(filename,camp ='OLYMPEX',band='Ku',savefig=False, Kuray = 23,
               & (MS['Longitude'][:,Karay] > minlon) & (MS['Longitude'][:,Karay] < maxlon))
     
     if band=='Ku':
-        fig,axes = plt.subplots(1,1,figsize=(15,4))
+        height = NS['Height']
+        fig,axes = plt.subplots(1,1,figsize=figsize)
         ax1 = axes
         ##Ku
         Z =np.transpose(np.squeeze(NS['zFactorCorrected'][indx,Kuray,:]))
@@ -195,13 +271,14 @@ def GPMDPR_profile(filename,camp ='OLYMPEX',band='Ku',savefig=False, Kuray = 23,
         Z[ind] = np.inf
         Z = np.ma.masked_invalid(Z, copy=True)
 
-        pm = ax1.pcolormesh(5.*np.arange(len(indx[0])),.125*np.arange(175,-1,-1),Z,cmap=cmap,vmin=vmin,vmax=vmax)
+        pm = ax1.pcolormesh(5.*np.arange(len(indx[0])),height[:,Kuray],Z,cmap=cmap,
+                            vmin=vmin,vmax=vmax)
         ax1.fill_between(5.*np.arange(len(indx[0])),.125*(176-np.squeeze(NS['binClutterFreeBottom'][indx,Kuray])),
                          color=[.5,.5,.5],alpha=.5)
         ax1.fill_between(5.*np.arange(len(indx[0])),.125*(176-np.squeeze(NS['binRealSurface'][indx,Kuray])),color='k')
         ax1.set_ylim([0,10])
         ax1.set_xlim,([0,max(5.*np.arange(len(indx[0])))])
-        ax1.set_ylabel('Slant range from ellipsoid, $[km]$',fontsize=fontsize)
+        ax1.set_ylabel('Height, $[km]$',fontsize=fontsize)
         ax1.set_title('KuNS',fontsize=fontsize)
         ax1.set_xlim([xmin,xmax])
         ax1.set_ylim([ymin,ymax])
@@ -212,28 +289,58 @@ def GPMDPR_profile(filename,camp ='OLYMPEX',band='Ku',savefig=False, Kuray = 23,
         cax = cbar.ax
         cax.tick_params(labelsize=fontsize2)
         ax1.set_xlabel('Distance, $[km]$',fontsize=fontsize)
-        plt.show()
+        
+    elif band == 'raw':
+        
+        fig,axes = plt.subplots(1,1,figsize=figsize)
+        ax1 = axes
+        ##Ku
+        height = NS['Height']
+        Z =np.transpose(np.squeeze(NS['zFactorMeasured'][indx,Kuray,:]))
+        ind = np.where(Z <= vmin )
+        Z[ind] = np.inf
+        Z = np.ma.masked_invalid(Z, copy=True)
+
+        pm = ax1.pcolormesh(5.*np.arange(len(indx[0])),height[:,Kuray],Z,cmap=cmap,
+                            vmin=vmin,vmax=vmax)
+        ax1.fill_between(5.*np.arange(len(indx[0])),.125*(176-np.squeeze(NS['binClutterFreeBottom'][indx,Kuray])),
+                         color=[.5,.5,.5],alpha=.5)
+        ax1.fill_between(5.*np.arange(len(indx[0])),.125*(176-np.squeeze(NS['binRealSurface'][indx,Kuray])),color='k')
+        ax1.set_ylim([0,10])
+        ax1.set_xlim,([0,max(5.*np.arange(len(indx[0])))])
+        ax1.set_ylabel('Height, $[km]$',fontsize=fontsize)
+        ax1.set_title('KuNS',fontsize=fontsize)
+        ax1.set_xlim([xmin,xmax])
+        ax1.set_ylim([ymin,ymax])
+        ax1.tick_params(axis='both',direction='in',labelsize=fontsize2,width=2,length=5)
+
+        cbar = plt.colorbar(pm,aspect=10,ax=ax1)
+        cbar.set_label('Reflectivity, $[dBZ]$')
+        cax = cbar.ax
+        cax.tick_params(labelsize=fontsize2)
+        ax1.set_xlabel('Distance, $[km]$',fontsize=fontsize)
+        
         
     elif band=='Ka':
-        fig,axes = plt.subplots(1,1,figsize=(15,4))
-        
-        
+        fig,axes = plt.subplots(1,1,figsize=figsize)
         ax2 = axes
         ##Ka
+        height = MS['Height']
         rayMS = 10
         Z =np.transpose(np.squeeze(MS['zFactorCorrected'][indx,Karay,:]))
         ind = np.where(Z <= vmin )
         Z[ind] = np.inf
         Z = np.ma.masked_invalid(Z, copy=True)
 
-        pm = ax2.pcolormesh(5.*np.arange(len(indxMS[0])),.125*np.arange(175,-1,-1),Z,cmap=cmap,vmin=vmin,vmax=vmax)
+        pm= ax2.pcolormesh(5.*np.arange(len(indxMS[0])),height[:,Karay],Z,cmap=cmap,
+                           vmin=vmin,vmax=vmax)
         ax2.fill_between(5.*np.arange(len(indxMS[0])),.125*(176-np.squeeze(MS['binClutterFreeBottom'][indxMS,Karay])),
                          color= [.5,.5,.5],alpha=0.5)
         ax2.fill_between(5.*np.arange(len(indxMS[0])),.125*(176-np.squeeze(MS['binRealSurface'][indxMS,Karay])),color='k')
 
         ax2.set_ylim([0,10])
         ax2.set_xlim,([0,max(5.*np.arange(len(indx[0])))])
-        ax2.set_ylabel('Slant range from ellipsoid, $[km]$',fontsize=fontsize)
+        ax2.set_ylabel('Height, $[km]$',fontsize=fontsize)
         ax2.set_title('KaMS',fontsize=fontsize)
         ax2.set_xlim([xmin,xmax])
         ax2.set_ylim([ymin,ymax])
@@ -244,10 +351,9 @@ def GPMDPR_profile(filename,camp ='OLYMPEX',band='Ku',savefig=False, Kuray = 23,
         cax = cbar.ax
         cax.tick_params(labelsize=fontsize2)
         ax2.set_xlabel('Distance, $[km]$',fontsize=fontsize)
-        plt.show()
 
     elif band=='KuKa':
-        fig,axes = plt.subplots(2,1,figsize=(15,8))
+        fig,axes = plt.subplots(2,1,figsize=figsize)
         ax1 = axes[0]
         ax2 = axes[1]
         
@@ -257,13 +363,14 @@ def GPMDPR_profile(filename,camp ='OLYMPEX',band='Ku',savefig=False, Kuray = 23,
         Z[ind] = np.inf
         Z = np.ma.masked_invalid(Z, copy=True)
 
-        pm = ax1.pcolormesh(5.*np.arange(len(indx[0])),.125*np.arange(175,-1,-1),Z,cmap=cmap,vmin=vmin,vmax=vmax)
+        pm = ax1.pcolormesh(5.*np.arange(len(indx[0])),height[:,Kuray],Z,cmap=cmap,
+                            vmin=vmin,vmax=vmax)
         ax1.fill_between(5.*np.arange(len(indx[0])),.125*(176-np.squeeze(NS['binClutterFreeBottom'][indx,Kuray])),
                          color=[.5,.5,.5],alpha=.5)
         ax1.fill_between(5.*np.arange(len(indx[0])),.125*(176-np.squeeze(NS['binRealSurface'][indx,Kuray])),color='k')
         ax1.set_ylim([0,10])
         ax1.set_xlim,([0,max(5.*np.arange(len(indx[0])))])
-        ax1.set_ylabel('Slant range from ellipsoid, $[km]$',fontsize=fontsize)
+        ax1.set_ylabel('Height, $[km]$',fontsize=fontsize)
         ax1.set_title('KuNS',fontsize=fontsize)
         ax1.set_xlim([xmin,xmax])
         ax1.set_ylim([ymin,ymax])
@@ -275,6 +382,7 @@ def GPMDPR_profile(filename,camp ='OLYMPEX',band='Ku',savefig=False, Kuray = 23,
         cax.tick_params(labelsize=fontsize2)
         
         ##Ka
+        height = MS['Height']
         ax2 = axes[1]
         rayMS = 10
         Z =np.transpose(np.squeeze(MS['zFactorCorrected'][indx,Karay,:]))
@@ -282,7 +390,8 @@ def GPMDPR_profile(filename,camp ='OLYMPEX',band='Ku',savefig=False, Kuray = 23,
         Z[ind] = np.inf
         Z = np.ma.masked_invalid(Z, copy=True)
 
-        pm = ax2.pcolormesh(5.*np.arange(len(indxMS[0])),.125*np.arange(175,-1,-1),Z,cmap=cmap,vmin=vmin,vmax=vmax)
+        pm = ax2.pcolormesh(5.*np.arange(len(indxMS[0])),height[:,Kuray],Z,cmap=cmap,
+                            vmin=vmin,vmax=vmax)
         ax2.fill_between(5.*np.arange(len(indxMS[0])),.125*(176-np.squeeze(MS['binClutterFreeBottom'][indxMS,Karay])),
                          color= [.5,.5,.5],alpha=0.5)
         ax2.fill_between(5.*np.arange(len(indxMS[0])),.125*(176-np.squeeze(MS['binRealSurface'][indxMS,Karay])),color='k')
@@ -300,7 +409,9 @@ def GPMDPR_profile(filename,camp ='OLYMPEX',band='Ku',savefig=False, Kuray = 23,
         cax = cbar.ax
         cax.tick_params(labelsize=fontsize2)
         ax2.set_xlabel('Distance, $[km]$',fontsize=fontsize)
-        plt.tight_layout()
-        plt.show()
+    if savefig:
+        print('Save file is: '+'Profile_'+band+camp+'.png')
+        plt.savefig('Profile_'+band+camp+'.png',dpi=300)    
+    plt.show()
         
-    return
+    return 
