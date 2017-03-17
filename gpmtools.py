@@ -28,8 +28,6 @@ def GPMDPRread(filename):
     ==============
     GPMDPRread reads in the standard GPM DPR radar file and returs a dictionary full of the datasets
     labeled. 
-    
-
     ==============
     """
 
