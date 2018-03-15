@@ -1,4 +1,23 @@
- rc
+ """
+
+=====================
+
+This is a GPM DPR toolkit for reading and plotting
+
+Developed by Stephen Nesbitt and Randy Chase at The University of Illinois, Urbana-Champaign, 2017
+
+=====================
+
+"""
+
+
+import h5py
+import numpy as np
+import pyresample as pr
+from pyresample import geometry, data_reduce
+import matplotlib.pyplot as plt
+from pyart.graph import cm
+from pylab import rc
 
 
 ##plot attributes 
@@ -852,3 +871,4 @@ def GPMDPR_xtrack(filename,camp =' ',band='Ku',savefig=False,Crossray=0, Kuray =
     plt.show()
     
     return
+   
